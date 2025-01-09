@@ -52,7 +52,7 @@ get_tmpfile() {
     printf "%s.%s" "$(mktemp)" "${suffix}"
   else
     # No really good options here--let's pick a default + hope
-    printf "/tmp/captain-hook.%s" "${suffix}"
+    printf "/tmp/mcp-gateway.%s" "${suffix}"
   fi
 }
 
@@ -90,7 +90,7 @@ download() {
   info "This is likely due to mcp-gateway not yet supporting your configuration."
   info "If you would like to see a build for your configuration,"
   info "please create an issue requesting a build for ${MAGENTA}${TARGET}${NO_COLOR}:"
-  info "${BOLD}${UNDERLINE}https://github.com/fdionisi/captain-hook/issues/new/${NO_COLOR}"
+  info "${BOLD}${UNDERLINE}https://github.com/fdionisi/mcp-gateway/issues/new/${NO_COLOR}"
   return $rc
 }
 
@@ -115,7 +115,7 @@ unpack() {
   error "Unknown package extension."
   printf "\n"
   info "This almost certainly results from a bug in this script--please file a"
-  info "bug report at https://github.com/fdionisi/captain-hook/issues"
+  info "bug report at https://github.com/fdionisi/mcp-gateway/issues"
   return 1
 }
 
@@ -123,7 +123,7 @@ usage() {
     cat <<EOT
 install.sh [option]
 
-Fetch and install the latest version of captain-hook, if captain-hook is already
+Fetch and install the latest version of mcp-gateway, if mcp-gateway is already
 installed it will be updated to the latest version.
 
 Options
@@ -313,7 +313,7 @@ is_build_available() {
     printf "\n" >&2
     info "If you would like to see a build for your configuration,"
     info "please create an issue requesting a build for ${MAGENTA}${target}${NO_COLOR}:"
-    info "${BOLD}${UNDERLINE}https://github.com/fdionisi/captain-hook/issues/new/${NO_COLOR}"
+    info "${BOLD}${UNDERLINE}https://github.com/fdionisi/mcp-gateway/issues/new/${NO_COLOR}"
     printf "\n"
     exit 1
   fi
@@ -333,7 +333,7 @@ if [ -z "${ARCH-}" ]; then
 fi
 
 if [ -z "${BASE_URL-}" ]; then
-  BASE_URL="https://github.com/fdionisi/captain-hook/releases"
+  BASE_URL="https://github.com/fdionisi/mcp-gateway/releases"
 fi
 
 # parse argv variables
@@ -426,7 +426,7 @@ if [ "${PLATFORM}" = "pc-windows-msvc" ]; then
   EXT=zip
 fi
 
-URL="${BASE_URL}/latest/download/captain-hook-${TARGET}.${EXT}"
+URL="${BASE_URL}/latest/download/mcp-gateway-${TARGET}.${EXT}"
 info "Tarball URL: ${UNDERLINE}${BLUE}${URL}${NO_COLOR}"
 confirm "Install mcp-gateway ${GREEN}latest${NO_COLOR} to ${BOLD}${GREEN}${BIN_DIR}${NO_COLOR}?"
 check_bin_dir "${BIN_DIR}"
