@@ -112,7 +112,7 @@ jobs:
           cd -
 
       - name: Deploy | Upload artifacts
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}
           path: ${{ matrix.name }}
@@ -134,7 +134,10 @@ jobs:
       #     go-version: "^1.15.7"
 
       - name: Setup | Artifacts
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mcp-gateway-*
+          merge-multiple: true
 
       - name: Setup | Checksums
         run: for file in mcp-gateway-*/mcp-gateway-*; do openssl dgst -sha256 -r "$file" | awk '{print $1}' > "${file}.sha256"; done
