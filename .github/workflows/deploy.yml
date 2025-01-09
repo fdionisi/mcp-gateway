@@ -137,7 +137,7 @@ jobs:
           merge-multiple: true
 
       - name: Setup | Checksums
-        run: for file in mcp-gateway-*/mcp-gateway-*; do openssl dgst -sha256 -r "$file" | awk '{print $1}' > "${file}.sha256"; done
+        run: for file in mcp-gateway-*; do openssl dgst -sha256 -r "$file" | awk '{print $1}' > "${file}.sha256"; done
 
       # - name: Setup | Release notes
       #   run: |
@@ -147,7 +147,7 @@ jobs:
       - name: Build | Publish
         uses: softprops/action-gh-release@v1
         with:
-          files: mcp-gateway-*/mcp-gateway-*
+          files: mcp-gateway-*
           # body_path: RELEASE.md
 
   # Publish mcp-gateway to Crates.io
