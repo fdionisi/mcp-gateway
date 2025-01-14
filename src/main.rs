@@ -13,6 +13,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 ///
 /// Bridge for connecting to an SSE backend and processing messages via stdio
 #[derive(Parser)]
+#[clap(version)]
 pub struct Config {
     /// SSE endpoint URL
     #[clap(long, env = "ENDPOINT")]
@@ -22,6 +23,7 @@ pub struct Config {
     #[clap(long, env = "RUST_LOG", default_value = "debug")]
     pub log_level: String,
 }
+
 async fn connect_sse_backend(
     client: Client,
     endpoint: String,
