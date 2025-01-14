@@ -22,66 +22,103 @@ pub struct Config {
     #[clap(long, env = "RUST_LOG", default_value = "debug")]
     pub log_level: String,
 }
-
 async fn connect_sse_backend(
     client: Client,
     endpoint: String,
     tx: mpsc::Sender<String>,
 ) -> Result<()> {
-    tracing::debug!("Connecting to SSE backend: {}", endpoint);
-    let mut stream = EventSource::new(client.get(&endpoint))?;
-    tracing::debug!("SSE stream established");
-
-    while let Some(event) = stream.next().await {
-        match event {
-            Ok(Event::Open) => {
-                tracing::debug!("SSE connection opened");
+    loop {
+        tracing::debug!("Connecting to SSE backend: {}", endpoint);
+        let mut stream = match EventSource::new(client.get(&endpoint)) {
+            Ok(stream) => stream,
+            Err(err) => {
+                tracing::error!("Failed to create EventSource: {:?}", err);
+                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
                 continue;
             }
-            Ok(Event::Message(message_event)) => {
-                tracing::debug!("Received SSE message event: {:?}", message_event.event);
-                if message_event.event == "endpoint" {
-                    tx.send(message_event.data)
-                        .await
-                        .map_err(|_| anyhow::anyhow!("Failed to send endpoint URL"))?;
-                    tracing::debug!("Sent endpoint URL");
-                } else {
-                    println!("{}", message_event.data);
-                    tracing::debug!("Processed message data: {}", message_event.data);
+        };
+        tracing::debug!("SSE stream established");
+
+        while let Some(event) = stream.next().await {
+            match event {
+                Ok(Event::Open) => {
+                    tracing::debug!("SSE connection opened");
+                    continue;
+                }
+                Ok(Event::Message(message_event)) => {
+                    tracing::debug!("Received SSE message event: {:?}", message_event.event);
+                    if message_event.event == "endpoint" {
+                        tx.send(message_event.data)
+                            .await
+                            .map_err(|_| anyhow::anyhow!("Failed to send endpoint URL"))?;
+                        tracing::debug!("Sent endpoint URL");
+                    } else {
+                        println!("{}", message_event.data);
+                        tracing::debug!("Processed message data: {}", message_event.data);
+                    }
+                }
+                Err(err) => {
+                    tracing::error!("Error in SSE stream: {:?}", err);
+                    stream.close();
+                    break;
                 }
             }
-            Err(err) => {
-                tracing::debug!("Error in SSE stream: {:?}", err);
-                stream.close();
-                match err {
-                    reqwest_eventsource::Error::StreamEnded => {
-                        tracing::debug!("SSE stream ended");
-                        continue;
+        }
+
+        tracing::debug!("SSE connection closed, attempting to reconnect");
+        tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
+    }
+}
+
+async fn process_stdin(client: Client, message_url_rx: &mut mpsc::Receiver<String>) -> Result<()> {
+    tracing::debug!("Starting to read from stdin");
+    let mut stdin = io::BufReader::new(io::stdin()).lines();
+
+    tracing::debug!("Waiting for endpoint URL");
+    let mut message_url = message_url_rx
+        .recv()
+        .await
+        .ok_or_else(|| anyhow::anyhow!("Failed to receive endpoint URL"))?;
+    tracing::debug!("Received endpoint URL: {}", message_url);
+
+    loop {
+        tokio::select! {
+            line = stdin.next_line() => {
+                match line {
+                    Ok(Some(input)) => {
+                        tracing::debug!("Received input: {}", input);
+                        let response = client
+                            .post(&message_url)
+                            .header("Content-Type", "application/json")
+                            .body(input)
+                            .send()
+                            .await?;
+                        tracing::debug!("Sent message, response status: {:?}", response.status());
                     }
-                    _ => tracing::debug!("Unexpected error: {:?}", err),
+                    Ok(None) => {
+                        tracing::debug!("Stdin processing task completed");
+                        break;
+                    }
+                    Err(e) => {
+                        tracing::error!("Error reading from stdin: {:?}", e);
+                        break;
+                    }
+                }
+            }
+            new_url = message_url_rx.recv() => {
+                match new_url {
+                    Some(url) => {
+                        tracing::debug!("Received new message URL: {}", url);
+                        message_url = url;
+                    }
+                    None => {
+                        tracing::debug!("Message URL channel closed");
+                        break;
+                    }
                 }
             }
         }
     }
-
-    tracing::debug!("SSE connection closed");
-    Ok(())
-}
-
-async fn process_stdin(client: Client, message_url: String) -> Result<()> {
-    tracing::debug!("Starting to read from stdin");
-    let mut stdin = io::BufReader::new(io::stdin()).lines();
-    while let Some(line) = stdin.next_line().await? {
-        tracing::debug!("Received input: {}", line);
-        let response = client
-            .post(&message_url)
-            .header("Content-Type", "application/json")
-            .body(line)
-            .send()
-            .await?;
-        tracing::debug!("Sent message, response status: {:?}", response.status());
-    }
-    tracing::debug!("Stdin processing task completed");
     Ok(())
 }
 
@@ -94,16 +131,10 @@ async fn run_bridge(endpoint: String) -> Result<()> {
     tracing::debug!("Spawning SSE backend connection task");
     let sse_task = tokio::spawn(connect_sse_backend(client.clone(), endpoint, tx));
     tracing::debug!("Spawning stdin processing task");
+
     let client_clone = client.clone();
     let stdin_task = tokio::spawn(async move {
-        tracing::debug!("Waiting for endpoint URL");
-        let message_url = rx
-            .recv()
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Failed to receive endpoint URL"))?;
-        tracing::debug!("Received endpoint URL: {}", message_url);
-
-        process_stdin(client_clone, message_url).await?;
+        process_stdin(client_clone, &mut rx).await?;
         Ok::<(), anyhow::Error>(())
     });
 
