@@ -41,26 +41,39 @@ async fn connect_sse_backend(
         };
         tracing::debug!("SSE stream established");
 
-        while let Some(event) = stream.next().await {
-            match event {
-                Ok(Event::Open) => {
-                    tracing::debug!("SSE connection opened");
-                    continue;
-                }
-                Ok(Event::Message(message_event)) => {
-                    tracing::debug!("Received SSE message event: {:?}", message_event.event);
-                    if message_event.event == "endpoint" {
-                        tx.send(message_event.data)
-                            .await
-                            .map_err(|_| anyhow::anyhow!("Failed to send endpoint URL"))?;
-                        tracing::debug!("Sent endpoint URL");
-                    } else {
-                        println!("{}", message_event.data);
-                        tracing::debug!("Processed message data: {}", message_event.data);
+        loop {
+            tokio::select! {
+                event = stream.next() => {
+                    match event {
+                        Some(Ok(Event::Open)) => {
+                            tracing::debug!("SSE connection opened");
+                            continue;
+                        }
+                        Some(Ok(Event::Message(message_event))) => {
+                            tracing::debug!("Received SSE message event: {:?}", message_event.event);
+                            if message_event.event == "endpoint" {
+                                tx.send(message_event.data)
+                                    .await
+                                    .map_err(|_| anyhow::anyhow!("Failed to send endpoint URL"))?;
+                                tracing::debug!("Sent endpoint URL");
+                            } else {
+                                println!("{}", message_event.data);
+                                tracing::debug!("Processed message data: {}", message_event.data);
+                            }
+                        }
+                        Some(Err(err)) => {
+                            tracing::error!("Error in SSE stream: {:?}", err);
+                            stream.close();
+                            break;
+                        }
+                        None => {
+                            tracing::debug!("SSE stream ended");
+                            break;
+                        }
                     }
                 }
-                Err(err) => {
-                    tracing::error!("Error in SSE stream: {:?}", err);
+                _ = tokio::time::sleep(tokio::time::Duration::from_secs(30)) => {
+                    tracing::warn!("SSE connection timed out after 30 seconds");
                     stream.close();
                     break;
                 }
