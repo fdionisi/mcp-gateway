@@ -1,8 +1,9 @@
 use anyhow::Result;
 use clap::Parser;
-use futures::StreamExt;
-use reqwest::Client;
-use reqwest_eventsource::{Event, EventSource};
+use futures::{FutureExt, StreamExt};
+use http_client::{AsyncBody, EventSource, EventSourceFragment, HttpClient, RequestBuilderExt};
+use http_client_reqwest::HttpClientReqwest;
+use std::sync::Arc;
 use tokio::{
     io::{self, AsyncBufReadExt},
     sync::mpsc,
@@ -25,43 +26,65 @@ pub struct Config {
 }
 
 async fn connect_sse_backend(
-    client: Client,
+    client: Arc<dyn HttpClient>,
     endpoint: String,
     tx: mpsc::Sender<String>,
 ) -> Result<()> {
     loop {
         tracing::debug!("Connecting to SSE backend: {}", endpoint);
-        let mut stream = match EventSource::new(client.get(&endpoint)) {
-            Ok(stream) => stream,
-            Err(err) => {
-                tracing::error!("Failed to create EventSource: {:?}", err);
-                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-                continue;
-            }
-        };
+
+        let request = http_client::http::Request::get(&endpoint)
+            .header("Accept", "text/event-stream")
+            .end()?;
+
+        let stream = client.event_source_fragments(request);
         tracing::debug!("SSE stream established");
 
-        while let Some(event) = stream.next().await {
-            match event {
-                Ok(Event::Open) => {
-                    tracing::debug!("SSE connection opened");
-                    continue;
-                }
-                Ok(Event::Message(message_event)) => {
-                    tracing::debug!("Received SSE message event: {:?}", message_event.event);
-                    if message_event.event == "endpoint" {
-                        tx.send(message_event.data)
-                            .await
-                            .map_err(|_| anyhow::anyhow!("Failed to send endpoint URL"))?;
-                        tracing::debug!("Sent endpoint URL");
-                    } else {
-                        println!("{}", message_event.data);
-                        tracing::debug!("Processed message data: {}", message_event.data);
+        let mut current_event_type = String::new();
+
+        let mut stream = Box::pin(stream);
+
+        loop {
+            tokio::select! {
+                fragment = stream.next() => {
+                    match fragment {
+                        Some(Ok(EventSourceFragment::Event(event_type))) => {
+                            current_event_type = event_type;
+                            tracing::debug!("Event type: {}", current_event_type);
+                        }
+                        Some(Ok(EventSourceFragment::Data(data))) => {
+                            // Process the complete event
+                            tracing::debug!("Received SSE message event: {:?}", current_event_type);
+                            if current_event_type == "endpoint" {
+                                current_event_type.clear();
+                                tx.send(data.clone())
+                                    .await
+                                    .map_err(|_| anyhow::anyhow!("Failed to send endpoint URL"))?;
+                                tracing::debug!("Sent endpoint URL");
+                            } else {
+                                println!("{}", data);
+                                tracing::debug!("Processed message data: {}", data);
+                            }
+                        }
+                        Some(Ok(_)) => {
+                            //
+                        }
+                        Some(Err(err)) => {
+                            tracing::error!("Error in SSE stream: {:?}", err);
+                            break;
+                        }
+                        None => {
+                            tracing::debug!("SSE stream ended");
+                            break;
+                        }
                     }
                 }
-                Err(err) => {
-                    tracing::error!("Error in SSE stream: {:?}", err);
-                    stream.close();
+                _ = futures::future::poll_fn(|cx| {
+                    let timeout = tokio::time::sleep(tokio::time::Duration::from_secs(15));
+                    futures::pin_mut!(timeout);
+                    timeout.poll_unpin(cx)
+                }).fuse() => {
+                    tracing::warn!("SSE connection timed out after 15 seconds");
                     break;
                 }
             }
@@ -72,7 +95,10 @@ async fn connect_sse_backend(
     }
 }
 
-async fn process_stdin(client: Client, message_url_rx: &mut mpsc::Receiver<String>) -> Result<()> {
+async fn process_stdin(
+    client: Arc<dyn HttpClient>,
+    message_url_rx: &mut mpsc::Receiver<String>,
+) -> Result<()> {
     tracing::debug!("Starting to read from stdin");
     let mut stdin = io::BufReader::new(io::stdin()).lines();
 
@@ -88,13 +114,16 @@ async fn process_stdin(client: Client, message_url_rx: &mut mpsc::Receiver<Strin
             line = stdin.next_line() => {
                 match line {
                     Ok(Some(input)) => {
+                        if input.is_empty() {
+                            continue;
+                        }
+
                         tracing::debug!("Received input: {}", input);
-                        let response = client
-                            .post(&message_url)
+                        let request = http_client::http::Request::post(&message_url)
                             .header("Content-Type", "application/json")
-                            .body(input)
-                            .send()
-                            .await?;
+                            .body(AsyncBody::from(input))?;
+
+                        let response = client.send(request).await?;
                         tracing::debug!("Sent message, response status: {:?}", response.status());
                     }
                     Ok(None) => {
@@ -126,7 +155,7 @@ async fn process_stdin(client: Client, message_url_rx: &mut mpsc::Receiver<Strin
 
 async fn run_bridge(endpoint: String) -> Result<()> {
     tracing::debug!("Initialising bridge");
-    let client = Client::new();
+    let client = Arc::new(HttpClientReqwest::default()) as Arc<dyn HttpClient>;
 
     let (tx, mut rx) = mpsc::channel::<String>(1);
 
@@ -153,7 +182,7 @@ async fn main() -> Result<()> {
 
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(format!(
-            "mcp_gateway={}",
+            "{}",
             config.log_level
         )))
         .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
