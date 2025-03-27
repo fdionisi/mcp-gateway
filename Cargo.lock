@@ -571,8 +571,8 @@ dependencies = [
 
 [[package]]
 name = "http-client"
-version = "0.3.0"
-source = "git+https://github.com/fdionisi/http-client#9ba65324f6b1f32d1b8210c0b94f47390715165b"
+version = "0.4.0"
+source = "git+https://github.com/fdionisi/http-client#527795f932b5ecbbed3bbcf8f1ac709ee6ef8314"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -587,7 +587,7 @@ dependencies = [
 [[package]]
 name = "http-client-reqwest"
 version = "0.3.0"
-source = "git+https://github.com/fdionisi/http-client#9ba65324f6b1f32d1b8210c0b94f47390715165b"
+source = "git+https://github.com/fdionisi/http-client#527795f932b5ecbbed3bbcf8f1ac709ee6ef8314"
 dependencies = [
  "anyhow",
  "futures",
